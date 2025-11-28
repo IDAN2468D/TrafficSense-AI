@@ -32,6 +32,7 @@ const CameraFeed: React.FC<CameraFeedProps> = ({
   
   const [isStreamActive, setIsStreamActive] = useState(false);
   const [permissionDenied, setPermissionDenied] = useState(false);
+  const [permissionErrorMsg, setPermissionErrorMsg] = useState("");
   const [detectedBoxes, setDetectedBoxes] = useState<BoundingBox[]>([]);
   
   const [isRateLimited, setIsRateLimited] = useState(false);
@@ -57,12 +58,23 @@ const CameraFeed: React.FC<CameraFeedProps> = ({
         videoRef.current.src = ""; // Clear src if switching from URL
         setIsStreamActive(true);
         setPermissionDenied(false);
+        setPermissionErrorMsg("");
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Camera access error:", err);
       setPermissionDenied(true);
       setIsStreamActive(false);
-      onError("Could not access camera. Please ensure permissions are granted.");
+      
+      let msg = "Could not access camera.";
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+          msg = "Camera permission denied. Please allow access in your browser settings (lock icon).";
+      } else if (err.name === 'NotFoundError') {
+          msg = "No camera device found.";
+      } else if (err.name === 'NotReadableError') {
+          msg = "Camera is currently in use by another application.";
+      }
+      setPermissionErrorMsg(msg);
+      onError(msg);
     }
   };
 
@@ -269,10 +281,25 @@ const CameraFeed: React.FC<CameraFeedProps> = ({
       
       {permissionDenied && (
         <div className="absolute inset-0 flex items-center justify-center text-red-400 bg-slate-900/90 z-20">
-          <div className="text-center p-6">
-            <CameraOff className="w-16 h-16 mx-auto mb-4" />
-            <p className="font-bold text-lg">Source Access Error</p>
-            <p className="text-sm mt-2">Could not access the camera or video stream.</p>
+          <div className="text-center p-6 max-w-sm">
+            <CameraOff className="w-16 h-16 mx-auto mb-4 opacity-50" />
+            <p className="font-bold text-lg mb-2">Camera Access Blocked</p>
+            <p className="text-sm text-slate-400 mb-6">{permissionErrorMsg || "Please enable camera permissions in your browser settings and try again."}</p>
+            
+            <button 
+                onClick={() => { setPermissionDenied(false); startCamera(); }}
+                className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg font-medium transition-colors shadow-lg"
+            >
+                Retry Access
+            </button>
+            <div className="mt-4">
+                <button 
+                    onClick={() => { setSourceType('url'); setPermissionDenied(false); }}
+                    className="text-xs text-indigo-400 hover:text-indigo-300 underline"
+                >
+                    Or use a Video URL instead
+                </button>
+            </div>
           </div>
         </div>
       )}
