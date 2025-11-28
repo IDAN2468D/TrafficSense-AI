@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Camera, CameraOff, Video, AlertCircle, Settings, Globe, Monitor, Hourglass } from 'lucide-react';
+import { Camera, CameraOff, Video, AlertCircle, Settings, Globe, Monitor, Hourglass, RefreshCw } from 'lucide-react';
 import { analyzeTrafficFrame } from '../services/geminiService';
 import { TrafficAnalysisResult, BoundingBox } from '../types';
 
@@ -23,6 +23,7 @@ const CameraFeed: React.FC<CameraFeedProps> = ({
   
   // Track consecutive errors for exponential backoff
   const errorCountRef = useRef(0);
+  const nextRetryTimeRef = useRef<number>(0);
   
   const [sourceType, setSourceType] = useState<VideoSource>('webcam');
   const [urlInput, setUrlInput] = useState('');
@@ -34,6 +35,7 @@ const CameraFeed: React.FC<CameraFeedProps> = ({
   const [detectedBoxes, setDetectedBoxes] = useState<BoundingBox[]>([]);
   
   const [isRateLimited, setIsRateLimited] = useState(false);
+  const [retryCountdown, setRetryCountdown] = useState(0);
 
   // Initialize Camera
   const startCamera = async () => {
@@ -45,8 +47,9 @@ const CameraFeed: React.FC<CameraFeedProps> = ({
          videoRef.current.srcObject = null;
       }
 
+      // Use lower resolution to save bandwidth/processing and reduce potential for payload errors
       const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } } 
+        video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } } 
       });
       
       if (videoRef.current) {
@@ -125,8 +128,8 @@ const CameraFeed: React.FC<CameraFeedProps> = ({
         canvas.height = video.videoHeight;
         context.drawImage(video, 0, 0, canvas.width, canvas.height);
         
-        // Get base64 data
-        const base64Image = canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
+        // Get base64 data - Use 0.7 quality to reduce payload size
+        const base64Image = canvas.toDataURL('image/jpeg', 0.7).split(',')[1];
         
         const result = await analyzeTrafficFrame(base64Image);
         
@@ -147,13 +150,29 @@ const CameraFeed: React.FC<CameraFeedProps> = ({
     }
   }, [isStreamActive, onAnalysisComplete, onError]);
 
+  // Force Retry Handler
+  const handleForceRetry = () => {
+      // Reset error count and trigger loop immediately via state/ref reset could be complex,
+      // easiest is to let the loop logic handle it by resetting the timestamp
+      errorCountRef.current = 0;
+      nextRetryTimeRef.current = 0; 
+      setIsRateLimited(false);
+  };
+
   // Smart Analysis Loop
   useEffect(() => {
     let timeoutId: number;
     let isMounted = true;
+    let countdownInterval: number;
 
     const loop = async () => {
       if (!isAnalyzing || !isStreamActive) return;
+
+      // Check if we need to wait (if manually forced retry, this check passes)
+      if (Date.now() < nextRetryTimeRef.current) {
+           timeoutId = window.setTimeout(loop, 1000); // Check again in 1s
+           return;
+      }
 
       try {
         await captureAndAnalyze();
@@ -177,19 +196,30 @@ const CameraFeed: React.FC<CameraFeedProps> = ({
                 // Increment error count for exponential backoff
                 errorCountRef.current += 1;
                 
-                // Backoff: 30s, 60s, 120s, etc. Cap at 5 minutes.
-                const backoffMs = Math.min(30000 * Math.pow(2, errorCountRef.current - 1), 300000);
+                // Backoff: 10s, 20s, 40s... Cap at 2 minutes.
+                // Start with smaller backoff (10s) to be less annoying
+                const backoffMs = Math.min(10000 * Math.pow(2, errorCountRef.current - 1), 120000);
                 
-                console.warn(`Rate limit hit. Backing off for ${backoffMs / 1000}s (Attempt ${errorCountRef.current})`);
+                nextRetryTimeRef.current = Date.now() + backoffMs;
                 setIsRateLimited(true);
                 
-                timeoutId = window.setTimeout(() => {
-                    if (isMounted) loop();
-                }, backoffMs);
+                // Start countdown for UI
+                let remaining = backoffMs;
+                setRetryCountdown(Math.ceil(remaining/1000));
+                
+                if (countdownInterval) clearInterval(countdownInterval);
+                countdownInterval = window.setInterval(() => {
+                    remaining -= 1000;
+                    if (remaining <= 0) clearInterval(countdownInterval);
+                    setRetryCountdown(Math.max(0, Math.ceil(remaining/1000)));
+                }, 1000);
+
+                console.warn(`Rate limit hit. Backing off for ${backoffMs / 1000}s`);
+                
+                timeoutId = window.setTimeout(loop, backoffMs);
 
             } else {
                 // Non-critical error (e.g. temporary network blip)
-                // Retry slightly slower than normal
                 console.warn("Temporary analysis error, retrying...", err);
                 timeoutId = window.setTimeout(loop, intervalMs * 1.5);
             }
@@ -202,14 +232,16 @@ const CameraFeed: React.FC<CameraFeedProps> = ({
     } else {
       // Reset state if stopped
       errorCountRef.current = 0;
+      nextRetryTimeRef.current = 0;
       setIsRateLimited(false);
     }
 
     return () => {
       isMounted = false;
       window.clearTimeout(timeoutId);
+      window.clearInterval(countdownInterval);
     };
-  }, [isAnalyzing, isStreamActive, intervalMs, captureAndAnalyze]);
+  }, [isAnalyzing, isStreamActive, intervalMs, captureAndAnalyze, isRateLimited]); // dependency isRateLimited added to re-trigger if forced to false
 
   const handleUrlSubmit = (e: React.FormEvent) => {
       e.preventDefault();
@@ -305,10 +337,15 @@ const CameraFeed: React.FC<CameraFeedProps> = ({
         )}
 
         {isRateLimited && (
-           <div className="flex items-center gap-2 bg-amber-600/90 backdrop-blur-md px-3 py-1.5 rounded-full text-xs font-medium text-white border border-amber-500/30 shadow-lg animate-pulse">
+           <button 
+             onClick={handleForceRetry}
+             className="flex items-center gap-2 bg-amber-600/90 hover:bg-amber-500 backdrop-blur-md px-3 py-1.5 rounded-full text-xs font-medium text-white border border-amber-500/30 shadow-lg transition-colors cursor-pointer group"
+             title="Click to force retry now"
+           >
              <Hourglass className="w-3 h-3" />
-             QUOTA LIMIT - PAUSED
-           </div>
+             QUOTA PAUSE ({retryCountdown}s)
+             <RefreshCw className="w-3 h-3 ml-1 opacity-50 group-hover:opacity-100" />
+           </button>
         )}
       </div>
 

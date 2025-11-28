@@ -103,7 +103,7 @@ const App: React.FC = () => {
               isAnalyzing={isAnalyzing} 
               onAnalysisComplete={handleAnalysisComplete}
               onError={handleError}
-              intervalMs={20000} // Increased to 20s to be safe
+              intervalMs={30000} // Increased to 30s to stay safely within free tier limits
             />
           </div>
 
@@ -120,8 +120,7 @@ const App: React.FC = () => {
             <Info className="w-5 h-5 flex-shrink-0 text-indigo-400" />
             <p>
               This application captures frames from your webcam and sends them to the Gemini 2.5 Flash model. 
-              The AI counts vehicles and categorizes congestion based on visual density, effectively replacing traditional 
-              background subtraction algorithms (like MOG2) with semantic understanding.
+              The AI counts vehicles and categorizes congestion based on visual density. Interval is set to 30s to prevent quota errors.
             </p>
           </div>
         </div>
@@ -169,7 +168,7 @@ const App: React.FC = () => {
           {/* Chart Card */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
              <h2 className="text-slate-400 text-sm font-medium uppercase tracking-wider mb-6 flex items-center gap-2">
-               <BarChart3 className="w-4 h-4" /> Density Trend (Last Min)
+               <BarChart3 className="w-4 h-4" /> Density Trend (Last 20)
              </h2>
              <AnalysisChart history={history} />
           </div>

@@ -79,11 +79,11 @@ export const analyzeTrafficFrame = async (base64Image: string): Promise<TrafficA
   } catch (error: any) {
     // Gracefully handle quota errors
     // IMPORTANT: Error objects often stringify to '{}', so we must check .message directly
-    const errorMessage = error.message || String(error);
+    const errorMessage = error.message ? error.message.toLowerCase() : String(error).toLowerCase();
     
     if (
       errorMessage.includes('429') || 
-      errorMessage.includes('RESOURCE_EXHAUSTED') || 
+      errorMessage.includes('resource_exhausted') || 
       errorMessage.includes('quota') ||
       errorMessage.includes('exceeded')
     ) {
