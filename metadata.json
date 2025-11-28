@@ -1,0 +1,7 @@
+{
+  "name": "TrafficSense AI",
+  "description": "Real-time traffic congestion detection and analysis using Gemini Vision API.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
